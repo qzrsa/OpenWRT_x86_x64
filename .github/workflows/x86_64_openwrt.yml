@@ -1,36 +1,42 @@
 name: immortalwrt_x86_64
 
+# 触发条件：定时任务（每天16:00）和手动触发
 on:
   schedule:
     - cron: 0 16 * * *
   workflow_dispatch:
 
+# 定义环境变量
 env:
-  REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: openwrt-24.10
-  CONFIG_FILE: immortalwrt/x86_64/defconfig.txt
-  DIY_P1_SH: immortalwrt/diy-part1.sh
-  DIY_P2_SH: immortalwrt/diy-part2.sh
-  UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: true
-  TZ: Asia/Shanghai
-  OPENWRT_NAME: immortalwrt
-  OPENWRT_NAME1: x86_64
+  REPO_URL: https://github.com/immortalwrt/immortalwrt  # 固件源代码仓库地址
+  REPO_BRANCH: openwrt-24.10  # 要使用的分支
+  CONFIG_FILE: immortalwrt/x86_64/defconfig.txt  # 配置文件路径
+  DIY_P1_SH: immortalwrt/diy-part1.sh  # 自定义脚本1路径
+  DIY_P2_SH: immortalwrt/diy-part2.sh  # 自定义脚本2路径
+  UPLOAD_FIRMWARE: true  # 是否上传固件
+  UPLOAD_RELEASE: true  # 是否发布Release
+  TZ: Asia/Shanghai  # 时区设置
+  OPENWRT_NAME: immortalwrt  # 固件名称
+  OPENWRT_NAME1: x86_64  # 固件架构
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04  # 使用的运行环境
 
     steps:
+    # 最大化构建空间
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
       with:
-        root-reserve-mb: 512
-        swap-size-mb: 1024
-        remove-dotnet: 'true'
+        root-reserve-mb: 512  # 根分区保留空间
+        swap-size-mb: 1024  # 交换空间大小
+        remove-dotnet: 'true'  # 是否移除dotnet
+
+    # 检出项目分支
     - name: Check out the project branch
       uses: actions/checkout@main
 
+    # 初始化编译环境
     - name: Initialize the compilation environment
       env:
         DEBIAN_FRONTEND: noninteractive
@@ -42,89 +48,100 @@ jobs:
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean ) &
-        sudo timedatectl set-timezone "$TZ"
-        
+        sudo timedatectl set-timezone "$TZ"  # 设置时区
+
+    # 初始化环境并显示系统信息
     - name: Initialize Environment and Display System Info
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        chmod +x $OPENWRT_NAME/*.sh
-        $GITHUB_WORKSPACE/$OPENWRT_NAME/system-Information.sh
-        
+        chmod +x $OPENWRT_NAME/*.sh  # 给脚本添加执行权限
+        $GITHUB_WORKSPACE/$OPENWRT_NAME/system-Information.sh  # 执行系统信息脚本
+
+    # 下载固件源代码
     - name: Download firmware source code
       run: |
-        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt  # 克隆指定分支的固件源代码
 
+    # 更新并安装feeds
     - name: Update & install feeds
-      working-directory: ./openwrt
+      working-directory: ./openwrt  # 指定工作目录
       run: |
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
-        
+        ./scripts/feeds update -a  # 更新所有feeds
+        ./scripts/feeds install -a  # 安装所有feeds
+
+    # 加载feeds.conf.default
     - name: Load feeds.conf.default
       run: |
-        chmod +x $OPENWRT_NAME/*.sh
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+        chmod +x $OPENWRT_NAME/*.sh  # 给脚本添加执行权限
+        cd openwrt  # 进入openwrt目录
+        $GITHUB_WORKSPACE/$DIY_P1_SH  # 执行自定义脚本1
 
+    # 加载配置文件
     - name: Load config
       run: |
-        [ -e "$CONFIG_FILE" ] && cat "$CONFIG_FILE" > openwrt/.config
-        chmod +x $OPENWRT_NAME/*.sh && cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        [ -e "$CONFIG_FILE" ] && cat "$CONFIG_FILE" > openwrt/.config  # 如果配置文件存在，将其内容复制到.openwrt.config
+        chmod +x $OPENWRT_NAME/*.sh && cd openwrt  # 给脚本添加执行权限并进入openwrt目录
+        $GITHUB_WORKSPACE/$DIY_P2_SH  # 执行自定义脚本2
 
+    # 下载安装包
     - name: Download the installation package
       id: package
       run: |
-        cd openwrt
-        make defconfig
-        cat .config
-        make download -j$(nproc)
-        find dl -size -1024c -exec ls -l {} \;
-        find dl -size -1024c -exec rm -f {} \;
-             
+        cd openwrt  # 进入openwrt目录
+        make defconfig  # 生成默认配置
+        cat .config  # 显示配置文件内容
+        make download -j$(nproc)  # 多线程下载安装包
+        find dl -size -1024c -exec ls -l {} \;  # 查找小于1024字节的文件并显示信息
+        find dl -size -1024c -exec rm -f {} \;  # 删除小于1024字节的文件
+
+    # 编译固件
     - name: Compile the firmware
       id: compile
       run: |
-        cd openwrt
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
-        echo "date1=$(date +'%Y.%m.%d')" >> $GITHUB_ENV
-        echo "date2=$(date "+%Y年%m月%d日")" >> $GITHUB_ENV
-        echo "status=success" >> $GITHUB_OUTPUT
+        cd openwrt  # 进入openwrt目录
+        echo -e "$(nproc) thread compile"  # 显示编译线程数
+        make -j$(nproc) || make -j1 || make -j1 V=s  # 多线程编译，失败则单线程编译
+        echo "date1=$(date +'%Y.%m.%d')" >> $GITHUB_ENV  # 将当前日期写入环境变量
+        echo "date2=$(date "+%Y年%m月%d日")" >> $GITHUB_ENV  # 将当前日期（中文格式）写入环境变量
 
+    # 组织并重命名文件
     - name: Organize and Rename Files
       id: organize
-      if: ${{ env.UPLOAD_FIRMWARE == 'true' && !cancelled() }}
+      if: ${{ env.UPLOAD_FIRMWARE == 'true' && !cancelled() }}  # 只有当UPLOAD_FIRMWARE为true且任务未取消时执行
       run: |
-        cd openwrt/bin/targets/x86/64
-        rm -rf packages *rootfs.tar.gz *rootfs.img.gz *combined.img.gz *.bin *.config *.buildinfo *.json sha256sums *.manifest
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "status=success" >> $GITHUB_OUTPUT
-        
-    - name: Upload the firmware to github
-      uses: actions/upload-artifact@main
-      if: steps.organize.outputs.status == 'success' && !cancelled()
-      with:
-        name: ${{ env.date1 }}_${{ env.OPENWRT_NAME }}_${{ env.OPENWRT_NAME1 }}
-        path: ${{ env.FIRMWARE }}
+        cd openwrt/bin/targets/x86/64  # 进入目标目录
+        rm -rf packages *rootfs.tar.gz *rootfs.img.gz *combined.img.gz *.bin *.config *.buildinfo *.json sha256sums *.manifest  # 删除不需要的文件
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV  # 将当前目录路径写入环境变量
+        echo "status=success" >> $GITHUB_OUTPUT  # 设置输出状态为成功
 
+    # 生成发布标签
     - name: Generate release tags
       id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()  # 只有当UPLOAD_RELEASE为true且任务未取消时执行
       run: |
-        echo "release_tag=${{ env.date2 }}" >> $GITHUB_OUTPUT
-        touch release.txt
-        echo "📥 固件下载" >> release.txt
-        echo "status=success" >> $GITHUB_OUTPUT
-        
+        echo "release_tag=${{ env.date2 }}" >> $GITHUB_OUTPUT  # 生成发布标签
+        touch release.txt  # 创建发布说明文件
+        echo "📥 固件下载" >> release.txt  # 写入发布说明内容
+        echo "status=success" >> $GITHUB_OUTPUT  # 设置输出状态为成功
+
+    # 创建Git标签并推送到远程仓库
+    - name: Create Git tag
+      if: steps.tag.outputs.status == 'success' && !cancelled()  # 只有当生成标签步骤成功且任务未取消时执行
+      run: |
+        git config --global user.name "GitHub Actions"  # 设置全局用户名
+        git config --global user.email "actions@github.com"  # 设置全局用户邮箱
+        git tag ${{ steps.tag.outputs.release_tag }}  # 创建Git标签
+        git push origin ${{ steps.tag.outputs.release_tag }}  # 将标签推送到远程仓库
+
+    # 发布到Release
     - name: Publish to release
-      uses: softprops/action-gh-release@v1
-      if: steps.tag.outputs.status == 'success' && !cancelled()
+      uses: softprops/action-gh-release@v1  # 使用action-gh-release发布Release
+      if: steps.tag.outputs.status == 'success' && !cancelled()  # 只有当生成标签步骤成功且任务未取消时执行
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 使用GitHub令牌
       with:
-        files: ${{ env.FIRMWARE }}/*
-        name: ${{ env.date3 }}
-        tag_name: ${{ steps.tag.outputs.release_tag }}
-        body_path: release.txt
+        files: ${{ env.FIRMWARE }}/*  # 要发布的文件
+        name: ${{ env.date2 }}  # Release名称
+        tag_name: ${{ steps.tag.outputs.release_tag }}  # 标签名称
+        body_path: release.txt  # 发布说明文件路径
